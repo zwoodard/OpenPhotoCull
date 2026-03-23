@@ -146,7 +146,10 @@ fn generate_feature_print(face_crop: &image::DynamicImage) -> Option<Vec<f32>> {
         if cg_image.is_null() { return None; }
 
         // Run VNGenerateImageFeaturePrintRequest
-        let request_cls = AnyClass::get(c"VNGenerateImageFeaturePrintRequest")?;
+        let request_cls = match AnyClass::get(c"VNGenerateImageFeaturePrintRequest") {
+            Some(c) => c,
+            None => { CGImageRelease(cg_image); return None; }
+        };
         let request: *mut AnyObject = msg_send![request_cls, alloc];
         let request: *mut AnyObject = msg_send![request, init];
         if request.is_null() {
@@ -154,11 +157,26 @@ fn generate_feature_print(face_crop: &image::DynamicImage) -> Option<Vec<f32>> {
             return None;
         }
 
-        let dict_cls = AnyClass::get(c"NSDictionary")?;
+        let dict_cls = match AnyClass::get(c"NSDictionary") {
+            Some(c) => c,
+            None => {
+                let _: () = msg_send![request, release];
+                CGImageRelease(cg_image);
+                return None;
+            }
+        };
         let empty_dict: *mut AnyObject = msg_send![dict_cls, alloc];
         let empty_dict: *mut AnyObject = msg_send![empty_dict, init];
 
-        let handler_cls = AnyClass::get(c"VNImageRequestHandler")?;
+        let handler_cls = match AnyClass::get(c"VNImageRequestHandler") {
+            Some(c) => c,
+            None => {
+                let _: () = msg_send![request, release];
+                let _: () = msg_send![empty_dict, release];
+                CGImageRelease(cg_image);
+                return None;
+            }
+        };
         let handler: *mut AnyObject = msg_send![handler_cls, alloc];
         let handler: *mut AnyObject = msg_send![handler, initWithCGImage: cg_image, options: empty_dict];
 
@@ -169,7 +187,16 @@ fn generate_feature_print(face_crop: &image::DynamicImage) -> Option<Vec<f32>> {
             return None;
         }
 
-        let array_cls = AnyClass::get(c"NSArray")?;
+        let array_cls = match AnyClass::get(c"NSArray") {
+            Some(c) => c,
+            None => {
+                let _: () = msg_send![request, release];
+                let _: () = msg_send![handler, release];
+                let _: () = msg_send![empty_dict, release];
+                CGImageRelease(cg_image);
+                return None;
+            }
+        };
         let array: *mut AnyObject = msg_send![array_cls, arrayWithObject: request];
 
         let mut error: *mut AnyObject = std::ptr::null_mut();
@@ -286,47 +313,59 @@ pub fn cluster_faces(
         }
     }
 
-    // Average-linkage agglomerative clustering
-    // Each cluster is a Vec of face indices
+    // Average-linkage agglomerative clustering with Lance-Williams update.
+    // Maintain an inter-cluster distance matrix so each merge is O(n), not O(n^2).
     let mut clusters: Vec<Vec<usize>> = (0..n).map(|i| vec![i]).collect();
+    let mut alive: Vec<bool> = vec![true; n]; // which cluster indices are still active
+    // csim[i][j] = average pairwise similarity between cluster i and j
+    // Initially just the point-to-point similarities.
+    let mut csim = sim.clone();
 
     loop {
-        // Find the most similar pair of clusters
+        // Find most similar pair among alive clusters
         let mut best_sim = f32::NEG_INFINITY;
-        let mut best_pair = (0, 0);
-
+        let mut best_i = 0;
+        let mut best_j = 0;
         for i in 0..clusters.len() {
+            if !alive[i] { continue; }
             for j in (i + 1)..clusters.len() {
-                // Average pairwise similarity between clusters
-                let mut total = 0.0f32;
-                let count = clusters[i].len() * clusters[j].len();
-                for &a in &clusters[i] {
-                    for &b in &clusters[j] {
-                        total += sim[a][b];
-                    }
-                }
-                let avg = total / count as f32;
-                if avg > best_sim {
-                    best_sim = avg;
-                    best_pair = (i, j);
+                if !alive[j] { continue; }
+                if csim[i][j] > best_sim {
+                    best_sim = csim[i][j];
+                    best_i = i;
+                    best_j = j;
                 }
             }
         }
 
-        if best_sim < similarity_threshold || clusters.len() <= 1 {
+        if best_sim < similarity_threshold || best_i == best_j {
             break;
         }
 
-        // Merge the two most similar clusters
-        let (i, j) = best_pair;
-        let merged = clusters.remove(j); // remove j first (larger index)
-        clusters[i].extend(merged);
+        // Merge j into i, update inter-cluster similarities via Lance-Williams
+        let ni = clusters[best_i].len() as f32;
+        let nj = clusters[best_j].len() as f32;
+        for k in 0..clusters.len() {
+            if !alive[k] || k == best_i || k == best_j { continue; }
+            // Average-linkage: new_sim(i+j, k) = (ni*sim(i,k) + nj*sim(j,k)) / (ni+nj)
+            let new_sim = (ni * csim[best_i][k] + nj * csim[best_j][k]) / (ni + nj);
+            csim[best_i][k] = new_sim;
+            csim[k][best_i] = new_sim;
+        }
+
+        // Move members from j to i
+        let members_j = std::mem::take(&mut clusters[best_j]);
+        clusters[best_i].extend(members_j);
+        alive[best_j] = false;
     }
 
     // Build result — every face gets a person-id
     let mut result: HashMap<String, Vec<(String, u32)>> = HashMap::new();
+    let mut group_counter = 0u32;
     for (ci, cluster) in clusters.iter().enumerate() {
-        let pid = format!("person-{}", ci + 1);
+        if !alive[ci] || cluster.is_empty() { continue; }
+        group_counter += 1;
+        let pid = format!("person-{}", group_counter);
         for &fi in cluster {
             result
                 .entry(pid.clone())

@@ -25,21 +25,25 @@ pub async fn execute_deletes(
 
     let mut deleted = 0;
     let mut errors = Vec::new();
+    let mut failed_ids = std::collections::HashSet::new();
 
     for id in &to_delete {
         if let Some(image) = index.get(id) {
             match trash::delete(&image.path) {
                 Ok(()) => deleted += 1,
-                Err(e) => errors.push(format!("{}: {}", image.file_name, e)),
+                Err(e) => {
+                    errors.push(format!("{}: {}", image.file_name, e));
+                    failed_ids.insert(id.clone());
+                }
             }
         }
     }
 
-    // Remove deleted marks
+    // Remove marks only for successfully deleted images
     drop(marks);
     let mut marks = state.marks.write().map_err(|e| e.to_string())?;
     for id in &to_delete {
-        if !errors.iter().any(|e| e.starts_with(id)) {
+        if !failed_ids.contains(id) {
             marks.remove(id);
         }
     }

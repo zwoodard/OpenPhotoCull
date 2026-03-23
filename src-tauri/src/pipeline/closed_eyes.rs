@@ -34,8 +34,6 @@ pub fn detect(_jpeg_data: Option<&[u8]>, _analysis_image: &image::DynamicImage) 
 
 #[cfg(target_os = "macos")]
 fn detect_from_jpeg(jpeg_data: &[u8]) -> Option<ClosedEyesResult> {
-    use objc2::msg_send;
-    use objc2::runtime::{AnyClass, AnyObject};
     use std::ffi::c_void;
 
     unsafe {
@@ -88,16 +86,32 @@ unsafe fn run_face_detection(cg_image: *const std::ffi::c_void) -> Option<Closed
     use objc2::msg_send;
     use objc2::runtime::{AnyClass, AnyObject};
 
-    let request_cls = AnyClass::get(c"VNDetectFaceLandmarksRequest")?;
+    let request_cls = match AnyClass::get(c"VNDetectFaceLandmarksRequest") {
+        Some(c) => c,
+        None => return None,
+    };
     let request: *mut AnyObject = msg_send![request_cls, alloc];
     let request: *mut AnyObject = msg_send![request, init];
     if request.is_null() { return None; }
 
-    let dict_cls = AnyClass::get(c"NSDictionary")?;
+    let dict_cls = match AnyClass::get(c"NSDictionary") {
+        Some(c) => c,
+        None => {
+            let _: () = msg_send![request, release];
+            return None;
+        }
+    };
     let empty_dict: *mut AnyObject = msg_send![dict_cls, alloc];
     let empty_dict: *mut AnyObject = msg_send![empty_dict, init];
 
-    let handler_cls = AnyClass::get(c"VNImageRequestHandler")?;
+    let handler_cls = match AnyClass::get(c"VNImageRequestHandler") {
+        Some(c) => c,
+        None => {
+            let _: () = msg_send![request, release];
+            let _: () = msg_send![empty_dict, release];
+            return None;
+        }
+    };
     let handler: *mut AnyObject = msg_send![handler_cls, alloc];
     let handler: *mut AnyObject = msg_send![handler, initWithCGImage: cg_image, options: empty_dict];
     if handler.is_null() {
@@ -106,7 +120,15 @@ unsafe fn run_face_detection(cg_image: *const std::ffi::c_void) -> Option<Closed
         return None;
     }
 
-    let array_cls = AnyClass::get(c"NSArray")?;
+    let array_cls = match AnyClass::get(c"NSArray") {
+        Some(c) => c,
+        None => {
+            let _: () = msg_send![request, release];
+            let _: () = msg_send![handler, release];
+            let _: () = msg_send![empty_dict, release];
+            return None;
+        }
+    };
     let array: *mut AnyObject = msg_send![array_cls, arrayWithObject: request];
 
     let mut error: *mut AnyObject = std::ptr::null_mut();

@@ -157,3 +157,15 @@ fn parse_rational_f64(value: &exif::Value) -> Option<f64> {
         _ => None,
     }
 }
+
+/// Parse EXIF date strings like "2024:01:15 14:30:00" to Unix timestamp.
+pub fn parse_exif_date(date_str: &str) -> Option<i64> {
+    let cleaned = date_str.replace('"', "").trim().to_string();
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&cleaned, "%Y-%m-%d %H:%M:%S") {
+        return Some(dt.and_utc().timestamp());
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&cleaned, "%Y:%m:%d %H:%M:%S") {
+        return Some(dt.and_utc().timestamp());
+    }
+    None
+}

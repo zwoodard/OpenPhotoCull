@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useStore, isBlurry, hasExposureIssue } from "../store";
 import { SettingsPanel } from "./SettingsPanel";
 
@@ -18,27 +18,29 @@ export function FilterBar() {
   ).length;
   const keepCount = Object.values(marks).filter((m) => m === "keep").length;
 
-  // Live counts using current thresholds
-  const blurryCount = images.filter((i) =>
-    isBlurry(analysisMap[i.id]?.blur, settings),
-  ).length;
-  const exposureCount = images.filter((i) =>
-    hasExposureIssue(analysisMap[i.id]?.exposure, settings),
-  ).length;
-  const dupCount = images.filter(
-    (i) => analysisMap[i.id]?.duplicateGroupId != null,
-  ).length;
-  const closedEyesCount = images.filter(
-    (i) => analysisMap[i.id]?.closedEyes?.hasClosedEyes === true,
-  ).length;
-  const backFocusCount = images.filter(
-    (i) => analysisMap[i.id]?.subjectFocus?.verdict === "BackFocus",
-  ).length;
-  const sceneCount = new Set(
-    images
-      .map((i) => analysisMap[i.id]?.sceneGroupId)
-      .filter(Boolean),
-  ).size;
+  const { blurryCount, exposureCount, dupCount, closedEyesCount, backFocusCount, sceneCount } =
+    useMemo(() => {
+      let blurry = 0, exposure = 0, dup = 0, closedEyes = 0, backFocus = 0;
+      const scenes = new Set<string>();
+      for (const img of images) {
+        const a = analysisMap[img.id];
+        if (!a) continue;
+        if (isBlurry(a.blur, settings)) blurry++;
+        if (hasExposureIssue(a.exposure, settings)) exposure++;
+        if (a.duplicateGroupId != null) dup++;
+        if (a.closedEyes?.hasClosedEyes === true) closedEyes++;
+        if (a.subjectFocus?.verdict === "BackFocus") backFocus++;
+        if (a.sceneGroupId) scenes.add(a.sceneGroupId);
+      }
+      return {
+        blurryCount: blurry,
+        exposureCount: exposure,
+        dupCount: dup,
+        closedEyesCount: closedEyes,
+        backFocusCount: backFocus,
+        sceneCount: scenes.size,
+      };
+    }, [images, analysisMap, settings]);
 
   const chipStyle = (active: boolean) => ({
     padding: "6px 12px",

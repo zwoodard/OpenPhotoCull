@@ -43,12 +43,6 @@ extern "C" {
 extern "C" {
     fn CGImageGetWidth(image: *const c_void) -> usize;
     fn CGImageGetHeight(image: *const c_void) -> usize;
-    fn CGImageGetBitsPerPixel(image: *const c_void) -> usize;
-    fn CGImageGetBytesPerRow(image: *const c_void) -> usize;
-    fn CGImageGetDataProvider(image: *const c_void) -> *const c_void;
-    fn CGDataProviderCopyData(provider: *const c_void) -> *const c_void;
-    fn CFDataGetLength(data: *const c_void) -> isize;
-    fn CFDataGetBytePtr(data: *const c_void) -> *const u8;
 
     fn CGColorSpaceCreateDeviceRGB() -> *const c_void;
     fn CGBitmapContextCreate(
@@ -60,7 +54,6 @@ extern "C" {
         space: *const c_void,
         bitmap_info: u32,
     ) -> *const c_void;
-    fn CGBitmapContextGetData(context: *const c_void) -> *mut u8;
     fn CGContextDrawImage(context: *const c_void, rect: CGRect, image: *const c_void);
     fn CGContextRelease(context: *const c_void);
     fn CGColorSpaceRelease(space: *const c_void);

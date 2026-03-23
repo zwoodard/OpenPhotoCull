@@ -1,5 +1,4 @@
 pub mod commands;
-pub mod imaging;
 pub mod index;
 pub mod pipeline;
 pub mod state;

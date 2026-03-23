@@ -193,10 +193,8 @@ function Row({ label, value }: { label: string; value: string }) {
 function barColor(step: string): string {
   const colors: Record<string, string> = {
     discovery: "#4ade80",
-    indexing: "#e94560",
-    "blur+exposure": "#fbbf24",
-    dup_image_load: "#818cf8",
-    duplicate_detect: "#f472b6",
+    process: "#fbbf24",
+    grouping: "#818cf8",
   };
   return colors[step] ?? "var(--accent)";
 }

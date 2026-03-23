@@ -1,5 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useStore, isBlurry, hasExposureIssue, exposureVerdict } from "../store";
+import { dupGroupColor } from "../lib/duplicates";
 
 export function PhotoDetail() {
   const selectedId = useStore((s) => s.selectedId);
@@ -199,12 +200,7 @@ export function PhotoDetail() {
               const groupId = analysis.duplicateGroupId!;
               const groupNum = groupId.replace(/\D/g, "") || groupId;
               const members = duplicateGroups[groupId] || [];
-              const colors = [
-                "#818cf8","#f472b6","#34d399","#fbbf24","#60a5fa",
-                "#a78bfa","#fb923c","#2dd4bf","#f87171","#4ade80",
-                "#e879f9","#38bdf8",
-              ];
-              const color = colors[((parseInt(groupNum, 10) || 1) - 1) % colors.length];
+              const color = dupGroupColor(groupId);
               return (
                 <div style={{ color }}>
                   <span style={{

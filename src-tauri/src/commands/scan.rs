@@ -134,8 +134,9 @@ pub async fn scan_folder(
 
             // 4-7. Run all per-image analysis on the resized image, then drop it
             let (analysis, phash, face_embs) = if let Some(ref analysis_img) = processed.analysis_image {
-                let blur = compute_blur(analysis_img);
-                let exposure = compute_exposure(analysis_img);
+                let gray = analysis_img.to_luma8();
+                let blur = compute_blur(&gray);
+                let exposure = compute_exposure(&gray);
                 let hash = hasher.hash_image(analysis_img);
                 let phash_bytes = hash.as_bytes().to_vec();
 
@@ -157,9 +158,8 @@ pub async fn scan_folder(
 
                 // Subject focus: compare blur in face regions vs background
                 let subject_focus = compute_subject_focus(
-                    analysis_img,
+                    &gray,
                     closed_eyes.as_ref(),
-                    blur.laplacian_variance,
                 );
 
                 // Face grouping: extract face crops, thumbnails, and embeddings
@@ -365,8 +365,7 @@ pub async fn scan_folder(
 
 // ── Inline analysis functions (no trait overhead, no allocation) ──
 
-fn compute_blur(image: &image::DynamicImage) -> BlurResult {
-    let gray = image.to_luma8();
+fn compute_blur(gray: &image::GrayImage) -> BlurResult {
     let (w, h) = (gray.width() as usize, gray.height() as usize);
 
     if w < 3 || h < 3 {
@@ -406,8 +405,7 @@ fn compute_blur(image: &image::DynamicImage) -> BlurResult {
     }
 }
 
-fn compute_exposure(image: &image::DynamicImage) -> ExposureResult {
-    let gray = image.to_luma8();
+fn compute_exposure(gray: &image::GrayImage) -> ExposureResult {
     let pixels = gray.as_raw();
     let total = pixels.len() as f64;
 
@@ -557,25 +555,15 @@ fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
         .sum()
 }
 
-fn parse_exif_date(date_str: &str) -> Option<i64> {
-    let cleaned = date_str.replace('"', "").trim().to_string();
-    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&cleaned, "%Y-%m-%d %H:%M:%S") {
-        return Some(dt.and_utc().timestamp());
-    }
-    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&cleaned, "%Y:%m:%d %H:%M:%S") {
-        return Some(dt.and_utc().timestamp());
-    }
-    None
-}
+use crate::index::metadata::parse_exif_date;
 
 // ── Subject focus detection ──
 
 use crate::index::store::{ClosedEyesResult, SubjectFocusResult};
 
 fn compute_subject_focus(
-    image: &image::DynamicImage,
+    gray: &image::GrayImage,
     closed_eyes: Option<&ClosedEyesResult>,
-    overall_variance: f64,
 ) -> Option<SubjectFocusResult> {
     let faces = closed_eyes?;
     if faces.face_count == 0 {
@@ -593,7 +581,6 @@ fn compute_subject_focus(
         return None;
     }
 
-    let gray = image.to_luma8();
     let (w, h) = (gray.width() as usize, gray.height() as usize);
     if w < 3 || h < 3 {
         return None;

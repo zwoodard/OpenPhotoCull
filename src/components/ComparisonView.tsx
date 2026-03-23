@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useStore, isBlurry } from "../store";
 
@@ -20,10 +21,12 @@ export function ComparisonView() {
     .map((id) => images.find((i) => i.id === id))
     .filter(Boolean) as typeof images;
 
-  if (members.length === 0) {
-    setComparisonMode(false);
-    return null;
-  }
+  const empty = members.length === 0;
+  useEffect(() => {
+    if (empty) setComparisonMode(false);
+  }, [empty, setComparisonMode]);
+
+  if (empty) return null;
 
   // Find the "best" image (highest blur variance = sharpest)
   const bestId = members.reduce((best, img) => {
