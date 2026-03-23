@@ -36,6 +36,21 @@ export async function getPersonGroups(): Promise<
   return invoke("get_person_groups");
 }
 
+export interface RegroupResult {
+  duplicateGroups: Record<string, string[]>;
+  sceneGroups: Record<string, string[]>;
+  personGroups: Record<string, Array<{ imageId: string; faceIndex: number }>>;
+  analysis: Record<string, import("../store/types").AnalysisResults>;
+}
+
+export async function regroup(params: {
+  duplicateThreshold: number;
+  sceneWindowSecs: number;
+  personSimilarity: number;
+}): Promise<RegroupResult> {
+  return invoke("regroup", { params });
+}
+
 export async function setMark(
   imageId: string,
   mark: string,

@@ -41,25 +41,39 @@ pub fn extract_faces(
 
     for (i, bbox) in face_boxes.iter().enumerate() {
         // Convert normalized bbox (bottom-left origin) to pixel coords (top-left origin)
-        let pad = 0.2; // 20% padding around face
-        let bx = (bbox[0] - pad * bbox[2]).max(0.0);
-        let by = (1.0 - bbox[1] - bbox[3] - pad * bbox[3]).max(0.0); // flip y
-        let bw = (bbox[2] * (1.0 + 2.0 * pad)).min(1.0 - bx);
-        let bh = (bbox[3] * (1.0 + 2.0 * pad)).min(1.0 - by);
+        // Tight crop (5% padding) for embedding — minimizes background influence.
+        // Wider crop (20% padding) for the thumbnail display.
+        let emb_pad = 0.05;
+        let thumb_pad = 0.20;
 
-        let px = (bx * img_w as f64) as u32;
-        let py = (by * img_h as f64) as u32;
-        let pw = ((bw * img_w as f64) as u32).min(img_w - px).max(1);
-        let ph = ((bh * img_h as f64) as u32).min(img_h - py).max(1);
+        let tight_bx = (bbox[0] - emb_pad * bbox[2]).max(0.0);
+        let tight_by = (1.0 - bbox[1] - bbox[3] - emb_pad * bbox[3]).max(0.0);
+        let tight_bw = (bbox[2] * (1.0 + 2.0 * emb_pad)).min(1.0 - tight_bx);
+        let tight_bh = (bbox[3] * (1.0 + 2.0 * emb_pad)).min(1.0 - tight_by);
 
-        // Crop face region
-        let face_crop = image.crop_imm(px, py, pw, ph);
+        let wide_bx = (bbox[0] - thumb_pad * bbox[2]).max(0.0);
+        let wide_by = (1.0 - bbox[1] - bbox[3] - thumb_pad * bbox[3]).max(0.0);
+        let wide_bw = (bbox[2] * (1.0 + 2.0 * thumb_pad)).min(1.0 - wide_bx);
+        let wide_bh = (bbox[3] * (1.0 + 2.0 * thumb_pad)).min(1.0 - wide_by);
 
-        // Save face crop thumbnail
+        let tight_px = (tight_bx * img_w as f64) as u32;
+        let tight_py = (tight_by * img_h as f64) as u32;
+        let tight_pw = ((tight_bw * img_w as f64) as u32).min(img_w - tight_px).max(1);
+        let tight_ph = ((tight_bh * img_h as f64) as u32).min(img_h - tight_py).max(1);
+
+        let wide_px = (wide_bx * img_w as f64) as u32;
+        let wide_py = (wide_by * img_h as f64) as u32;
+        let wide_pw = ((wide_bw * img_w as f64) as u32).min(img_w - wide_px).max(1);
+        let wide_ph = ((wide_bh * img_h as f64) as u32).min(img_h - wide_py).max(1);
+
+        let tight_crop = image.crop_imm(tight_px, tight_py, tight_pw, tight_ph);
+        let wide_crop = image.crop_imm(wide_px, wide_py, wide_pw, wide_ph);
+
+        // Save face crop thumbnail (wide crop for display)
         let face_thumb_name = format!("{}_face_{}.jpg", &image_id[..16.min(image_id.len())], i);
         let face_thumb_path = thumb_cache_dir.join(&face_thumb_name);
         if !face_thumb_path.exists() {
-            let small = face_crop.resize(120, 120, image::imageops::FilterType::Triangle);
+            let small = wide_crop.resize(120, 120, image::imageops::FilterType::Triangle);
             let rgb = small.to_rgb8();
             let mut buf = Vec::new();
             if image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 75)
@@ -70,8 +84,8 @@ pub fn extract_faces(
             }
         }
 
-        // Generate feature print embedding
-        let embedding = generate_feature_print(&face_crop);
+        // Generate feature print embedding (tight crop for identity)
+        let embedding = generate_feature_print(&tight_crop);
 
         faces.push(FaceInfo {
             face_index: i as u32,
@@ -212,11 +226,16 @@ fn generate_feature_print(face_crop: &image::DynamicImage) -> Option<Vec<f32>> {
     }
 }
 
-/// Cluster face embeddings into person groups using simple agglomerative clustering.
-/// Returns a map of person_id -> [(image_id, face_index)].
+/// Cluster face embeddings using average-linkage agglomerative clustering
+/// with cosine similarity. `similarity_threshold` is the minimum average cosine
+/// similarity between a candidate face and all members of an existing cluster
+/// for it to be merged in (0.0 = unrelated, 1.0 = identical).
+///
+/// Average-linkage prevents the transitive "chaining" problem of single-linkage,
+/// where two dissimilar faces merge because each is similar to a shared third face.
 pub fn cluster_faces(
     entries: &[(String, u32, Vec<f32>)], // (image_id, face_index, embedding)
-    distance_threshold: f32,
+    similarity_threshold: f32,
 ) -> HashMap<String, Vec<(String, u32)>> {
     if entries.len() < 2 {
         return HashMap::new();
@@ -233,70 +252,90 @@ pub fn cluster_faces(
         return HashMap::new();
     }
 
-    // Union-find for clustering
     let n = valid.len();
-    let mut parent: Vec<usize> = (0..n).collect();
 
-    fn find(parent: &mut [usize], x: usize) -> usize {
-        if parent[x] != x {
-            parent[x] = find(parent, parent[x]);
+    // Pre-compute the full NxN cosine similarity matrix
+    let norms: Vec<f32> = valid
+        .iter()
+        .map(|(_, e)| {
+            let sum: f32 = e.2.iter().map(|x| x * x).sum();
+            sum.sqrt()
+        })
+        .collect();
+
+    let mut sim = vec![vec![0.0f32; n]; n];
+    for i in 0..n {
+        sim[i][i] = 1.0;
+        if norms[i] == 0.0 {
+            continue;
         }
-        parent[x]
+        for j in (i + 1)..n {
+            if norms[j] == 0.0 {
+                continue;
+            }
+            let dot: f32 = valid[i]
+                .1
+                .2
+                .iter()
+                .zip(valid[j].1 .2.iter())
+                .map(|(a, b)| a * b)
+                .sum();
+            let s = dot / (norms[i] * norms[j]);
+            sim[i][j] = s;
+            sim[j][i] = s;
+        }
     }
 
-    // Compare all pairs and union if distance below threshold
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let dist = l2_distance(&valid[i].1 .2, &valid[j].1 .2);
-            if dist < distance_threshold {
-                let ri = find(&mut parent, i);
-                let rj = find(&mut parent, j);
-                if ri != rj {
-                    parent[ri] = rj;
+    // Average-linkage agglomerative clustering
+    // Each cluster is a Vec of face indices
+    let mut clusters: Vec<Vec<usize>> = (0..n).map(|i| vec![i]).collect();
+
+    loop {
+        // Find the most similar pair of clusters
+        let mut best_sim = f32::NEG_INFINITY;
+        let mut best_pair = (0, 0);
+
+        for i in 0..clusters.len() {
+            for j in (i + 1)..clusters.len() {
+                // Average pairwise similarity between clusters
+                let mut total = 0.0f32;
+                let count = clusters[i].len() * clusters[j].len();
+                for &a in &clusters[i] {
+                    for &b in &clusters[j] {
+                        total += sim[a][b];
+                    }
+                }
+                let avg = total / count as f32;
+                if avg > best_sim {
+                    best_sim = avg;
+                    best_pair = (i, j);
                 }
             }
         }
-    }
 
-    // Collect groups with 2+ members
-    let mut root_to_group: HashMap<usize, String> = HashMap::new();
-    let mut result: HashMap<String, Vec<(String, u32)>> = HashMap::new();
-    let mut group_counter = 0u32;
-
-    for i in 0..n {
-        let root = find(&mut parent, i);
-        let has_group = (0..n).any(|j| j != i && find(&mut parent, j) == root);
-        if !has_group && root == i {
-            // Single face, no group
-            // Still assign a person-id for identification
-            group_counter += 1;
-            let pid = format!("person-{}", group_counter);
-            result
-                .entry(pid)
-                .or_default()
-                .push((valid[i].1 .0.clone(), valid[i].1 .1));
-            continue;
+        if best_sim < similarity_threshold || clusters.len() <= 1 {
+            break;
         }
 
-        let pid = root_to_group.entry(root).or_insert_with(|| {
-            group_counter += 1;
-            format!("person-{}", group_counter)
-        });
-        result
-            .entry(pid.clone())
-            .or_default()
-            .push((valid[i].1 .0.clone(), valid[i].1 .1));
+        // Merge the two most similar clusters
+        let (i, j) = best_pair;
+        let merged = clusters.remove(j); // remove j first (larger index)
+        clusters[i].extend(merged);
+    }
+
+    // Build result — every face gets a person-id
+    let mut result: HashMap<String, Vec<(String, u32)>> = HashMap::new();
+    for (ci, cluster) in clusters.iter().enumerate() {
+        let pid = format!("person-{}", ci + 1);
+        for &fi in cluster {
+            result
+                .entry(pid.clone())
+                .or_default()
+                .push((valid[fi].1 .0.clone(), valid[fi].1 .1));
+        }
     }
 
     result
-}
-
-fn l2_distance(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() || a.is_empty() {
-        return f32::MAX;
-    }
-    let sum: f32 = a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum();
-    sum.sqrt()
 }
 
 // ── Apple framework FFI ──

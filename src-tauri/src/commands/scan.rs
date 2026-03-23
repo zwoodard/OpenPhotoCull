@@ -277,7 +277,22 @@ pub async fn scan_folder(
                 .map(|(fi, emb)| (r.image.id.clone(), fi as u32, emb.clone()))
         })
         .collect();
-    let person_groups = crate::pipeline::face_grouping::cluster_faces(&face_entries, 20.0);
+    let person_groups = crate::pipeline::face_grouping::cluster_faces(&face_entries, 0.65);
+
+    // Cache grouping inputs for later regrouping without re-scan
+    {
+        let gdata: Vec<crate::state::GroupingData> = results
+            .iter()
+            .enumerate()
+            .map(|(i, r)| crate::state::GroupingData {
+                image_id: r.image.id.clone(),
+                timestamp: dup_entries[i].timestamp,
+                phash: r.phash.clone(),
+                face_embeddings: r.face_embeddings.clone(),
+            })
+            .collect();
+        *state.grouping_data.write().map_err(|e| e.to_string())? = gdata;
+    }
 
     // Build a lookup: (image_id, face_index) -> person_id
     let mut face_person_map: HashMap<(String, u32), String> = HashMap::new();
@@ -441,13 +456,13 @@ fn compute_exposure(image: &image::DynamicImage) -> ExposureResult {
 
 // ── Duplicate grouping (hash-only, no image data) ──
 
-struct DupEntry {
-    index: usize,
-    timestamp: i64,
-    phash: Option<Vec<u8>>,
+pub struct DupEntry {
+    pub index: usize,
+    pub timestamp: i64,
+    pub phash: Option<Vec<u8>>,
 }
 
-fn find_duplicate_groups(
+pub fn find_duplicate_groups(
     entries: &[DupEntry],
     time_window_secs: i64,
     hash_distance_threshold: u32,
@@ -655,7 +670,7 @@ fn compute_subject_focus(
 
 // ── Scene grouping (timestamp-based, broader than duplicates) ──
 
-fn find_scene_groups(
+pub fn find_scene_groups(
     entries: &[DupEntry],
     scene_window_secs: i64,
 ) -> HashMap<usize, String> {

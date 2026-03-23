@@ -1,9 +1,18 @@
+import { useCallback, useRef, useState } from "react";
 import { useStore } from "../store";
+import { regroup } from "../lib/tauri";
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const settings = useStore((s) => s.settings);
   const setSetting = useStore((s) => s.setSetting);
   const analysisMap = useStore((s) => s.analysisMap);
+  const setBulkAnalysis = useStore((s) => s.setBulkAnalysis);
+  const setDuplicateGroups = useStore((s) => s.setDuplicateGroups);
+  const setSceneGroups = useStore((s) => s.setSceneGroups);
+  const setPersonGroups = useStore((s) => s.setPersonGroups);
+
+  const [regrouping, setRegrouping] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Count how many images are flagged at current thresholds
   const entries = Object.values(analysisMap);
@@ -16,6 +25,31 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       (a.exposure.pctUnderexposed > settings.exposureThreshold ||
         a.exposure.pctOverexposed > settings.exposureThreshold),
   ).length;
+
+  const triggerRegroup = useCallback(
+    (dupThresh: number, sceneWindow: number) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(async () => {
+        setRegrouping(true);
+        try {
+          const result = await regroup({
+            duplicateThreshold: dupThresh,
+            sceneWindowSecs: sceneWindow,
+            personSimilarity: 0.65,
+          });
+          setBulkAnalysis(result.analysis);
+          setDuplicateGroups(result.duplicateGroups);
+          setSceneGroups(result.sceneGroups);
+          setPersonGroups(result.personGroups);
+        } catch (e) {
+          console.error("Regroup failed:", e);
+        } finally {
+          setRegrouping(false);
+        }
+      }, 300);
+    },
+    [setBulkAnalysis, setDuplicateGroups, setSceneGroups, setPersonGroups],
+  );
 
   return (
     <div
@@ -106,7 +140,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           min={2}
           max={20}
           step={1}
-          onChange={(v) => setSetting("duplicateThreshold", v)}
+          onChange={(v) => {
+            setSetting("duplicateThreshold", v);
+            triggerRegroup(v, settings.sceneWindowSecs);
+          }}
           displayValue={`${settings.duplicateThreshold}`}
           lowLabel="Strict"
           highLabel="Loose"
@@ -120,7 +157,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           min={10}
           max={120}
           step={5}
-          onChange={(v) => setSetting("sceneWindowSecs", v)}
+          onChange={(v) => {
+            setSetting("sceneWindowSecs", v);
+            triggerRegroup(settings.duplicateThreshold, v);
+          }}
           displayValue={`${settings.sceneWindowSecs}s`}
           lowLabel="Tight (10s)"
           highLabel="Loose (120s)"
@@ -137,8 +177,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             lineHeight: 1.5,
           }}
         >
-          Blur and exposure thresholds apply instantly. Duplicate sensitivity
-          and scene window require a re-scan to take effect.
+          {regrouping
+            ? "Regrouping..."
+            : "All thresholds apply instantly — no re-scan needed."}
         </div>
       </div>
     </div>

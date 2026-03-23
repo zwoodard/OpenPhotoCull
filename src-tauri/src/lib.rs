@@ -22,6 +22,7 @@ pub fn run() {
             commands::analyze::get_duplicate_groups,
             commands::analyze::get_scene_groups,
             commands::analyze::get_person_groups,
+            commands::analyze::regroup,
             commands::review::set_mark,
             commands::review::bulk_set_mark,
             commands::review::get_full_image_path,

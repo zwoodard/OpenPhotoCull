@@ -13,11 +13,23 @@ pub enum Mark {
     Unmarked,
 }
 
+/// Per-image data needed for regrouping without a full re-scan.
+#[derive(Debug, Clone)]
+pub struct GroupingData {
+    pub image_id: String,
+    pub timestamp: i64,
+    pub phash: Option<Vec<u8>>,
+    /// Per-face embeddings (index-aligned with analysis.faces)
+    pub face_embeddings: Vec<Vec<f32>>,
+}
+
 pub struct AppState {
     pub index: RwLock<Option<ImageIndex>>,
     pub analysis: RwLock<Option<AnalysisIndex>>,
     pub marks: RwLock<HashMap<String, Mark>>,
     pub thumbnail_dir: PathBuf,
+    /// Cached grouping inputs — populated during scan, consumed by regroup
+    pub grouping_data: RwLock<Vec<GroupingData>>,
 }
 
 impl AppState {
@@ -33,6 +45,7 @@ impl AppState {
             analysis: RwLock::new(None),
             marks: RwLock::new(HashMap::new()),
             thumbnail_dir: cache_dir,
+            grouping_data: RwLock::new(Vec::new()),
         }
     }
 }

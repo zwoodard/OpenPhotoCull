@@ -28,6 +28,10 @@ path = "src/bin/vision_bench.rs"
 name = "gen_test_images"
 path = "src/bin/gen_test_images.rs"
 
+[[bin]]
+name = "face_debug"
+path = "src/bin/face_debug.rs"
+
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
