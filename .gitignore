@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test photos (large binary files)
+test-photos/
+
+# Environment
+.env
+.env.*
+
+# Tauri debug
+src-tauri/target/
+
+# Thumbnail cache
+thumbs/
