@@ -4,6 +4,10 @@ A fast, open-source desktop app for photo culling. Scan a folder, automatically 
 
 Built with Rust + Tauri v2 + React. Runs natively on macOS with cross-platform support planned for Windows and Linux.
 
+![Main review screen with photo grid, filter bar, and analysis badges](screenshots/main_screen.png)
+
+![Analysis Settings panel with tunable thresholds](screenshots/settings.png)
+
 ## Features
 
 ### Analysis Pipeline (single-pass, ~120 images/sec)
