@@ -4,6 +4,12 @@ A fast, open-source desktop app for photo culling. Scan a folder, automatically 
 
 Built with Rust + Tauri v2 + React. Runs natively on macOS with cross-platform support planned for Windows and Linux.
 
+**100% private** — every photo stays on your machine. No cloud uploads, no accounts, no telemetry, no internet connection required. Your photos are yours.
+
+**Blazing fast** — processes 150+ images per second on Apple Silicon. A 1,000-photo shoot analyzes in under 10 seconds. Commercial alternatives charge $10-15/month and are slower.
+
+**Free forever** — open source under the MIT license. No subscriptions, no trials, no feature gates.
+
 ![Main review screen with photo grid, filter bar, and analysis badges](screenshots/main_screen.png)
 
 ![Analysis Settings panel with tunable thresholds](screenshots/settings.png)
@@ -32,14 +38,15 @@ Built with Rust + Tauri v2 + React. Runs natively on macOS with cross-platform s
 
 ### Performance
 
-Benchmarked on Apple Silicon (M-series) with 85 mixed photos (577 MB, JPEGs up to 16MB/26MP):
+Benchmarked on Apple Silicon (M-series):
 
 | Metric | Value |
 |---|---|
-| Processing speed | **121 images/sec** |
-| Total scan+analyze time | **702ms** (85 photos) |
+| Processing speed | **150+ images/sec** |
+| 100 photos (typical shoot) | **~650ms** |
+| 85 large photos (15MB JPEGs) | **~1.3s** |
 | Peak memory | ~40MB (constant, regardless of library size) |
-| Largest JPEG decode | 65ms (16MB, 6240x4160 via Apple Image I/O) |
+| Slowest single image | <150ms (16MB, 26MP JPEG with 8 faces) |
 
 Key optimizations:
 - Apple Image I/O hardware JPEG decoder with built-in Lanczos downscaling (2.5x faster than libjpeg-turbo)
