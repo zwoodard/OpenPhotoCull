@@ -32,6 +32,10 @@ path = "src/bin/gen_test_images.rs"
 name = "face_debug"
 path = "src/bin/face_debug.rs"
 
+[[bin]]
+name = "face_perf"
+path = "src/bin/face_perf.rs"
+
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
@@ -57,6 +61,11 @@ tracing-subscriber = "0.3"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+# Optimize dependencies even in dev builds — image decoding and
+# Vision FFI are 10-20x slower without optimization.
+[profile.dev.package."*"]
+opt-level = 2
 
 [profile.release]
 strip = true

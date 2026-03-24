@@ -1,13 +1,21 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
 import type { ImageEntry, AnalysisResults, ScanProgress } from "../store/types";
 
+export interface ScanResult {
+  images: ImageEntry[];
+  analysis: Record<string, AnalysisResults>;
+  duplicateGroups: Record<string, string[]>;
+  sceneGroups: Record<string, string[]>;
+  personGroups: Record<string, Array<{ imageId: string; faceIndex: number }>>;
+}
+
 export async function scanFolder(
   path: string,
   onProgress: (progress: ScanProgress) => void,
-): Promise<ImageEntry[]> {
+): Promise<ScanResult> {
   const channel = new Channel<ScanProgress>();
   channel.onmessage = onProgress;
-  return invoke<ImageEntry[]>("scan_folder", { path, onProgress: channel });
+  return invoke<ScanResult>("scan_folder", { path, onProgress: channel });
 }
 
 export async function runAnalysis(

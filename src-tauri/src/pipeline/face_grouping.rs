@@ -10,6 +10,18 @@ use std::path::Path;
 
 use crate::index::store::FaceInfo;
 
+/// Pre-warm the Vision feature print model by running a tiny dummy inference.
+/// This takes ~1.8s on first call but makes subsequent calls ~4ms/face.
+/// Call once at the start of a scan to avoid paying the cold-start per-image.
+#[cfg(target_os = "macos")]
+pub fn warmup_feature_print_model() {
+    let tiny = image::DynamicImage::new_rgb8(8, 8);
+    let _ = generate_feature_print(&tiny);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn warmup_feature_print_model() {}
+
 /// Extract face embeddings and generate face crop thumbnails.
 /// Returns a Vec of FaceInfo per detected face, plus raw embeddings for clustering.
 ///

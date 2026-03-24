@@ -36,12 +36,110 @@ fn progress(
 }
 
 /// Per-image result from the single-pass pipeline.
-struct SinglePassResult {
-    image: IndexedImage,
-    analysis: AnalysisResults,
-    phash: Option<Vec<u8>>,
+pub struct SinglePassResult {
+    pub image: IndexedImage,
+    pub analysis: AnalysisResults,
+    pub phash: Option<Vec<u8>>,
     /// Per-face embeddings for person clustering (index-aligned with analysis.faces)
-    face_embeddings: Vec<Vec<f32>>,
+    pub face_embeddings: Vec<Vec<f32>>,
+}
+
+/// Process a single image through the full analysis pipeline.
+/// This is the core per-image work: EXIF → decode → resize → thumbnail →
+/// blur → exposure → phash → closed eyes → subject focus → (optional) face embeddings.
+///
+/// When `face_grouping` is false, face crops/thumbnails and embeddings are skipped,
+/// but closed eye detection and subject focus still run (they only need face bounding boxes).
+pub fn process_single_image(
+    disc: &crate::index::discovery::DiscoveredImage,
+    thumb_dir: &std::path::Path,
+    hasher: &image_hasher::Hasher,
+    face_grouping: bool,
+) -> SinglePassResult {
+    let path_str = disc.path.to_string_lossy().to_string();
+    let file_name = disc.path.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let id = thumbnail::cache_key(&path_str, disc.modified_at);
+
+    let exif = metadata::extract_metadata(&disc.path);
+    let processed = thumbnail::process_image(&disc.path, thumb_dir, &id);
+
+    let (analysis, phash, face_embs) = if let Some(ref analysis_img) = processed.analysis_image {
+        let gray = analysis_img.to_luma8();
+        let blur = compute_blur(&gray);
+        let exposure = compute_exposure(&gray);
+        let hash = hasher.hash_image(analysis_img);
+        let phash_bytes = hash.as_bytes().to_vec();
+
+        let ext = disc.path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase())
+            .unwrap_or_default();
+        let jpeg_data = if ext == "jpg" || ext == "jpeg" {
+            std::fs::read(&disc.path).ok()
+        } else {
+            None
+        };
+        let closed_eyes = crate::pipeline::closed_eyes::detect(
+            jpeg_data.as_deref(),
+            analysis_img,
+        );
+
+        let subject_focus = compute_subject_focus(&gray, closed_eyes.as_ref());
+
+        let face_boxes: Vec<[f64; 4]> = closed_eyes.as_ref()
+            .map(|ce| ce.faces.iter().filter_map(|f| f.bounding_box).collect())
+            .unwrap_or_default();
+        let (face_infos, face_embs) = if face_grouping && !face_boxes.is_empty() {
+            crate::pipeline::face_grouping::extract_faces(
+                analysis_img, &face_boxes, thumb_dir, &id,
+            )
+        } else {
+            (vec![], vec![])
+        };
+
+        (
+            AnalysisResults {
+                blur: Some(blur),
+                exposure: Some(exposure),
+                duplicate_group_id: None,
+                scene_group_id: None,
+                closed_eyes,
+                subject_focus,
+                faces: if face_infos.is_empty() { None } else { Some(face_infos) },
+            },
+            Some(phash_bytes),
+            face_embs,
+        )
+    } else {
+        (AnalysisResults::default(), None, vec![])
+    };
+
+    SinglePassResult {
+        image: IndexedImage {
+            id,
+            path: path_str,
+            file_name,
+            file_size: disc.file_size,
+            modified_at: disc.modified_at,
+            width: processed.width,
+            height: processed.height,
+            thumbnail_path: processed.thumbnail_path,
+            exif,
+        },
+        analysis,
+        phash,
+        face_embeddings: face_embs,
+    }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanResult {
+    pub images: Vec<IndexedImage>,
+    pub analysis: HashMap<String, AnalysisResults>,
+    pub duplicate_groups: HashMap<String, Vec<String>>,
+    pub scene_groups: HashMap<String, Vec<String>>,
+    pub person_groups: HashMap<String, Vec<crate::commands::analyze::PersonGroupEntry>>,
 }
 
 #[tauri::command]
@@ -49,7 +147,7 @@ pub async fn scan_folder(
     path: String,
     on_progress: Channel<ProgressEvent>,
     state: State<'_, Arc<AppState>>,
-) -> Result<Vec<IndexedImage>, String> {
+) -> Result<ScanResult, String> {
     let root = PathBuf::from(&path);
     if !root.is_dir() {
         return Err("Invalid directory path".into());
@@ -103,9 +201,22 @@ pub async fn scan_folder(
         .hash_size(16, 16)
         .to_hasher();
 
-    // Use a dedicated thread pool with limited parallelism for image processing.
-    // Default rayon uses all CPU cores, but each in-flight decode is ~200MB.
-    // 4 threads keeps peak memory under ~800MB while still saturating I/O.
+    // Pre-warm Vision models to avoid ~500ms-2s cold-start on first images.
+    // Run both warmups concurrently via rayon since they load different models.
+    let face_grouping = true;
+    {
+        let warmup_start = Instant::now();
+        rayon::join(
+            || crate::pipeline::closed_eyes::warmup_face_detection_model(),
+            || {
+                if face_grouping {
+                    crate::pipeline::face_grouping::warmup_feature_print_model();
+                }
+            },
+        );
+        tracing::info!("Vision model warmup: {}ms", warmup_start.elapsed().as_millis());
+    }
+
     let num_threads = std::cmp::min(8, rayon::current_num_threads());
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
@@ -116,85 +227,7 @@ pub async fn scan_folder(
     discovered
         .par_iter()
         .map(|disc| {
-            let path_str = disc.path.to_string_lossy().to_string();
-            let file_name = disc
-                .path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-
-            let id = thumbnail::cache_key(&path_str, disc.modified_at);
-
-            // 1. EXIF extraction (reads file header only)
-            let exif = metadata::extract_metadata(&disc.path);
-
-            // 2-3. Decode + SIMD resize → thumbnail + analysis image
-            let processed = thumbnail::process_image(&disc.path, &thumb_dir, &id);
-
-            // 4-7. Run all per-image analysis on the resized image, then drop it
-            let (analysis, phash, face_embs) = if let Some(ref analysis_img) = processed.analysis_image {
-                let gray = analysis_img.to_luma8();
-                let blur = compute_blur(&gray);
-                let exposure = compute_exposure(&gray);
-                let hash = hasher.hash_image(analysis_img);
-                let phash_bytes = hash.as_bytes().to_vec();
-
-                // Closed eye detection (macOS: uses Vision framework on raw JPEG,
-                // other platforms: returns None)
-                let ext = disc.path.extension()
-                    .and_then(|e| e.to_str())
-                    .map(|e| e.to_lowercase())
-                    .unwrap_or_default();
-                let jpeg_data = if ext == "jpg" || ext == "jpeg" {
-                    std::fs::read(&disc.path).ok()
-                } else {
-                    None
-                };
-                let closed_eyes = crate::pipeline::closed_eyes::detect(
-                    jpeg_data.as_deref(),
-                    analysis_img,
-                );
-
-                // Subject focus: compare blur in face regions vs background
-                let subject_focus = compute_subject_focus(
-                    &gray,
-                    closed_eyes.as_ref(),
-                );
-
-                // Face grouping: extract face crops, thumbnails, and embeddings
-                let face_boxes: Vec<[f64; 4]> = closed_eyes
-                    .as_ref()
-                    .map(|ce| ce.faces.iter().filter_map(|f| f.bounding_box).collect())
-                    .unwrap_or_default();
-                let (face_infos, face_embs) = if !face_boxes.is_empty() {
-                    crate::pipeline::face_grouping::extract_faces(
-                        analysis_img,
-                        &face_boxes,
-                        &thumb_dir,
-                        &id,
-                    )
-                } else {
-                    (vec![], vec![])
-                };
-
-                (
-                    AnalysisResults {
-                        blur: Some(blur),
-                        exposure: Some(exposure),
-                        duplicate_group_id: None,
-                        scene_group_id: None,
-                        closed_eyes,
-                        subject_focus,
-                        faces: if face_infos.is_empty() { None } else { Some(face_infos) },
-                    },
-                    Some(phash_bytes),
-                    face_embs,
-                )
-            } else {
-                (AnalysisResults::default(), None, vec![])
-            };
-            // analysis_img is dropped here — no memory buildup
+            let result = process_single_image(disc, &thumb_dir, &hasher, face_grouping);
 
             let done = counter.fetch_add(1, Ordering::Relaxed) + 1;
             if done % 5 == 0 || done == total {
@@ -204,34 +237,21 @@ pub async fn scan_folder(
                         current: done,
                         total,
                         elapsed_ms: global_start.elapsed().as_millis() as u64,
-                        current_file: Some(file_name.clone()),
+                        current_file: Some(result.image.file_name.clone()),
                         step_timings: None,
                     })
                     .ok();
             }
 
-            SinglePassResult {
-                image: IndexedImage {
-                    id,
-                    path: path_str,
-                    file_name,
-                    file_size: disc.file_size,
-                    modified_at: disc.modified_at,
-                    width: processed.width,
-                    height: processed.height,
-                    thumbnail_path: processed.thumbnail_path,
-                    exif,
-                },
-                analysis,
-                phash,
-                face_embeddings: face_embs,
-            }
+            result
         })
         .collect()
     }); // end pool.install
 
     let process_ms = phase_start.elapsed().as_millis() as u64;
     step_timings.insert("process".into(), process_ms);
+    tracing::info!("Pipeline processing: {}ms for {} images ({:.1} imgs/sec)",
+        process_ms, total, total as f64 / (process_ms as f64 / 1000.0));
 
     // Phase 3: Duplicate grouping — operates on hashes + timestamps only, no images
     on_progress
@@ -304,7 +324,9 @@ pub async fn scan_folder(
 
     let dup_ms = dup_start.elapsed().as_millis() as u64;
     step_timings.insert("grouping".into(), dup_ms);
+    tracing::info!("Grouping + caching: {}ms", dup_ms);
 
+    let build_start = Instant::now();
     // Build final data structures
     let mut images = Vec::with_capacity(results.len());
     let mut analysis_map = HashMap::with_capacity(results.len());
@@ -338,16 +360,22 @@ pub async fn scan_folder(
         images.push(r.image);
     }
 
-    // Store everything in state
+    tracing::info!("Build data structures: {}ms", build_start.elapsed().as_millis());
+
+    // Store clones in state, keep originals for the IPC response
+    let store_start = Instant::now();
     let index = ImageIndex::new(root, images.clone());
     *state.index.write().map_err(|e| e.to_string())? = Some(index);
     *state.analysis.write().map_err(|e| e.to_string())? =
         Some(crate::index::store::AnalysisIndex {
-            results: analysis_map,
-            duplicate_groups: dup_group_map,
-            scene_groups: scene_group_map,
-            person_groups,
+            results: analysis_map.clone(),
+            duplicate_groups: dup_group_map.clone(),
+            scene_groups: scene_group_map.clone(),
+            person_groups: person_groups.clone(),
         });
+
+    tracing::info!("Store in state: {}ms", store_start.elapsed().as_millis());
+    tracing::info!("TOTAL scan_folder wall clock: {}ms", global_start.elapsed().as_millis());
 
     on_progress
         .send(progress(
@@ -360,7 +388,25 @@ pub async fn scan_folder(
         ))
         .ok();
 
-    Ok(images)
+    // Build person group entries for the response
+    let person_group_entries: HashMap<String, Vec<crate::commands::analyze::PersonGroupEntry>> =
+        person_groups.iter().map(|(pid, members)| {
+            (pid.clone(), members.iter().map(|(img_id, fi)| {
+                crate::commands::analyze::PersonGroupEntry {
+                    image_id: img_id.clone(),
+                    face_index: *fi,
+                }
+            }).collect())
+        }).collect();
+
+    // Return everything in one shot — no additional IPC round trips needed
+    Ok(ScanResult {
+        images,
+        analysis: analysis_map,
+        duplicate_groups: dup_group_map,
+        scene_groups: scene_group_map,
+        person_groups: person_group_entries,
+    })
 }
 
 // ── Inline analysis functions (no trait overhead, no allocation) ──

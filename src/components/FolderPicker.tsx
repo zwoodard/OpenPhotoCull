@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useStore } from "../store";
-import { scanFolder, runAnalysis, getDuplicateGroups, getSceneGroups, getPersonGroups } from "../lib/tauri";
+import { scanFolder } from "../lib/tauri";
 
 export function FolderPicker() {
   const setFolderPath = useStore((s) => s.setFolderPath);
@@ -21,23 +21,15 @@ export function FolderPicker() {
     setPhase("scanning");
 
     try {
-      // Single-pass scan: discovers, thumbnails, and analyzes all at once
-      const images = await scanFolder(path, (progress) => {
+      // Single IPC call returns everything — images, analysis, groups
+      const result = await scanFolder(path, (progress) => {
         updateScanProgress(progress);
       });
-      setImages(images);
-
-      // Fetch the analysis results computed during scan
-      const [analysisResults, dupGroups, sceneGrps, personGrps] = await Promise.all([
-        runAnalysis(() => {}),
-        getDuplicateGroups(),
-        getSceneGroups(),
-        getPersonGroups(),
-      ]);
-      setBulkAnalysis(analysisResults);
-      setDuplicateGroups(dupGroups);
-      setSceneGroups(sceneGrps);
-      setPersonGroups(personGrps);
+      setImages(result.images);
+      setBulkAnalysis(result.analysis);
+      setDuplicateGroups(result.duplicateGroups);
+      setSceneGroups(result.sceneGroups);
+      setPersonGroups(result.personGroups);
 
       setPhase("review");
     } catch (err) {

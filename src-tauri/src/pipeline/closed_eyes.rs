@@ -14,6 +14,23 @@ use crate::index::store::FaceEyeResult;
 /// Returns None on non-macOS platforms or if detection fails.
 ///
 /// The `analysis_image` parameter is a DynamicImage at analysis resolution.
+/// Pre-warm the face detection model. Call once at scan start.
+#[cfg(target_os = "macos")]
+pub fn warmup_face_detection_model() {
+    // Create a tiny 1x1 white JPEG to trigger model load
+    let mut buf = Vec::new();
+    let img = image::RgbImage::from_pixel(8, 8, image::Rgb([128, 128, 128]));
+    image::codecs::jpeg::JpegEncoder::new(&mut buf)
+        .encode(&img, 8, 8, image::ExtendedColorType::Rgb8)
+        .ok();
+    if !buf.is_empty() {
+        let _ = detect_from_jpeg(&buf);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn warmup_face_detection_model() {}
+
 /// On macOS we ignore it and use the raw JPEG data directly with Image I/O
 /// (faster path — avoids pixel format conversion).
 #[cfg(target_os = "macos")]
