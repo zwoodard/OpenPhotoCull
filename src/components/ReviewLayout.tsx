@@ -11,15 +11,36 @@ export function ReviewLayout() {
   const selectedId = useStore((s) => s.selectedId);
   const setSelectedId = useStore((s) => s.setSelectedId);
   const setMark = useStore((s) => s.setMark);
+  const bulkMark = useStore((s) => s.bulkMark);
   const filteredImages = useStore((s) => s.filteredImages);
+  const multiSelection = useStore((s) => s.multiSelection);
+  const clearMultiSelection = useStore((s) => s.clearMultiSelection);
+  const selectAll = useStore((s) => s.selectAll);
+  const invertSelection = useStore((s) => s.invertSelection);
+  const selectRange = useStore((s) => s.selectRange);
   const comparisonMode = useStore((s) => s.comparisonMode);
   const setComparisonMode = useStore((s) => s.setComparisonMode);
   const analysisMap = useStore((s) => s.analysisMap);
 
-  // Keyboard navigation
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      // C toggles comparison mode (only if selected image is in a duplicate group)
+      const meta = e.metaKey || e.ctrlKey;
+
+      // Cmd/Ctrl+A — Select all filtered images
+      if (meta && e.key === "a") {
+        e.preventDefault();
+        selectAll();
+        return;
+      }
+
+      // Cmd/Ctrl+Shift+I — Invert selection
+      if (meta && e.shiftKey && (e.key === "i" || e.key === "I")) {
+        e.preventDefault();
+        invertSelection();
+        return;
+      }
+
+      // C toggles comparison mode
       if (e.key === "c" || e.key === "C") {
         if (selectedId && analysisMap[selectedId]?.duplicateGroupId) {
           setComparisonMode(!comparisonMode);
@@ -27,13 +48,19 @@ export function ReviewLayout() {
         return;
       }
 
-      // Escape exits comparison mode
-      if (e.key === "Escape" && comparisonMode) {
-        setComparisonMode(false);
+      // Escape — clear multi-selection first, then exit comparison mode
+      if (e.key === "Escape") {
+        if (multiSelection.size > 0) {
+          clearMultiSelection();
+          return;
+        }
+        if (comparisonMode) {
+          setComparisonMode(false);
+          return;
+        }
         return;
       }
 
-      // Don't navigate while in comparison mode
       if (comparisonMode) return;
 
       const filtered = filteredImages();
@@ -43,36 +70,71 @@ export function ReviewLayout() {
         ? filtered.findIndex((i) => i.id === selectedId)
         : -1;
 
-      switch (e.key) {
-        case "ArrowRight":
-        case "ArrowDown": {
-          e.preventDefault();
-          const next = Math.min(idx + 1, filtered.length - 1);
-          setSelectedId(filtered[next].id);
-          break;
+      // Arrow key navigation
+      if (
+        e.key === "ArrowRight" ||
+        e.key === "ArrowDown" ||
+        e.key === "ArrowLeft" ||
+        e.key === "ArrowUp"
+      ) {
+        e.preventDefault();
+        const forward = e.key === "ArrowRight" || e.key === "ArrowDown";
+        const nextIdx = forward
+          ? Math.min(idx + 1, filtered.length - 1)
+          : Math.max(idx - 1, 0);
+        const nextId = filtered[nextIdx].id;
+
+        if (e.shiftKey && selectedId) {
+          // Shift+Arrow — extend range selection
+          selectRange(selectedId, nextId);
+        } else if (!e.shiftKey && multiSelection.size > 0) {
+          // Plain arrow clears multi-selection
+          clearMultiSelection();
         }
-        case "ArrowLeft":
-        case "ArrowUp": {
-          e.preventDefault();
-          const prev = Math.max(idx - 1, 0);
-          setSelectedId(filtered[prev].id);
-          break;
+
+        setSelectedId(nextId);
+        return;
+      }
+
+      // K/D/U — mark selected image(s)
+      const markKey =
+        e.key === "k" || e.key === "K"
+          ? "keep"
+          : e.key === "d" || e.key === "D"
+            ? "delete"
+            : e.key === "u" || e.key === "U"
+              ? "unmarked"
+              : null;
+
+      if (markKey) {
+        if (multiSelection.size > 0) {
+          // Apply to all multi-selected images
+          const ids = [...multiSelection];
+          if (selectedId && !multiSelection.has(selectedId)) {
+            ids.push(selectedId);
+          }
+          bulkMark(ids, markKey as "keep" | "delete" | "unmarked");
+        } else if (selectedId) {
+          setMark(selectedId, markKey as "keep" | "delete" | "unmarked");
         }
-        case "k":
-        case "K":
-          if (selectedId) setMark(selectedId, "keep");
-          break;
-        case "d":
-        case "D":
-          if (selectedId) setMark(selectedId, "delete");
-          break;
-        case "u":
-        case "U":
-          if (selectedId) setMark(selectedId, "unmarked");
-          break;
+        return;
       }
     },
-    [selectedId, filteredImages, setSelectedId, setMark, comparisonMode, setComparisonMode, analysisMap],
+    [
+      selectedId,
+      filteredImages,
+      setSelectedId,
+      setMark,
+      bulkMark,
+      multiSelection,
+      clearMultiSelection,
+      selectAll,
+      invertSelection,
+      selectRange,
+      comparisonMode,
+      setComparisonMode,
+      analysisMap,
+    ],
   );
 
   useEffect(() => {

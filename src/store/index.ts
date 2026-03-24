@@ -80,6 +80,8 @@ interface AppState {
   toggleMultiSelect: (id: string) => void;
   clearMultiSelection: () => void;
   selectRange: (fromId: string, toId: string) => void;
+  selectAll: () => void;
+  invertSelection: () => void;
   setComparisonMode: (mode: boolean) => void;
 
   settings: AnalysisSettings;
@@ -142,14 +144,18 @@ export const useStore = create<AppState>((set, get) => ({
   selectedId: null,
   multiSelection: new Set(),
   comparisonMode: false,
-  setMark: (imageId, mark) =>
-    set((state) => ({ marks: { ...state.marks, [imageId]: mark } })),
-  bulkMark: (imageIds, mark) =>
+  setMark: (imageId, mark) => {
+    set((state) => ({ marks: { ...state.marks, [imageId]: mark } }));
+    import("../lib/tauri").then((t) => t.setMark(imageId, mark));
+  },
+  bulkMark: (imageIds, mark) => {
     set((state) => {
       const next = { ...state.marks };
       for (const id of imageIds) next[id] = mark;
       return { marks: next };
-    }),
+    });
+    import("../lib/tauri").then((t) => t.bulkSetMark(imageIds, mark));
+  },
   setSelectedId: (id) => set({ selectedId: id }),
   toggleMultiSelect: (id) =>
     set((state) => {
@@ -169,6 +175,20 @@ export const useStore = create<AppState>((set, get) => ({
       const end = Math.max(fromIdx, toIdx);
       const next = new Set(state.multiSelection);
       for (let i = start; i <= end; i++) next.add(images[i].id);
+      return { multiSelection: next };
+    }),
+  selectAll: () =>
+    set((state) => {
+      const images = state.filteredImages();
+      return { multiSelection: new Set(images.map((i) => i.id)) };
+    }),
+  invertSelection: () =>
+    set((state) => {
+      const images = state.filteredImages();
+      const next = new Set<string>();
+      for (const img of images) {
+        if (!state.multiSelection.has(img.id)) next.add(img.id);
+      }
       return { multiSelection: next };
     }),
   setComparisonMode: (mode) => set({ comparisonMode: mode }),

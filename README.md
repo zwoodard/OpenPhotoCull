@@ -148,13 +148,17 @@ src/                              React/TypeScript frontend
 | Key | Action |
 |---|---|
 | Arrow keys | Navigate photos |
-| K | Mark selected as Keep |
-| D | Mark selected as Delete |
-| U | Unmark selected |
+| Shift+Arrow | Extend range selection |
+| K | Mark as Keep (applies to all selected if multi-selecting) |
+| D | Mark as Delete (applies to all selected if multi-selecting) |
+| U | Unmark (applies to all selected if multi-selecting) |
+| Cmd/Ctrl+A | Select all filtered photos |
+| Cmd/Ctrl+Shift+I | Invert selection |
+| Escape | Clear selection, or exit comparison mode |
 | C | Toggle comparison mode (duplicate groups) |
-| Escape | Exit comparison mode |
+| Click | Select single photo (clears multi-selection) |
 | Shift+Click | Range select |
-| Cmd/Ctrl+Click | Multi-select |
+| Cmd/Ctrl+Click | Toggle individual in multi-selection |
 
 ## Platform Support
 

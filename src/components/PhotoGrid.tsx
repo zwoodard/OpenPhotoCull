@@ -45,6 +45,8 @@ export function PhotoGrid() {
     overscan: 5,
   });
 
+  const clearMultiSelection = useStore((s) => s.clearMultiSelection);
+
   const handleClick = useCallback(
     (id: string, e: React.MouseEvent) => {
       if (e.metaKey || e.ctrlKey) {
@@ -52,10 +54,11 @@ export function PhotoGrid() {
       } else if (e.shiftKey && selectedId) {
         selectRange(selectedId, id);
       } else {
+        if (multiSelection.size > 0) clearMultiSelection();
         setSelectedId(id);
       }
     },
-    [selectedId, setSelectedId, toggleMultiSelect, selectRange],
+    [selectedId, multiSelection, setSelectedId, toggleMultiSelect, selectRange, clearMultiSelection],
   );
 
   return (
@@ -141,8 +144,9 @@ export function PhotoGrid() {
               >
               {rowImages.map((img) => {
                 const mark: Mark = marks[img.id] || "unmarked";
-                const isSelected =
-                  selectedId === img.id || multiSelection.has(img.id);
+                const isPrimary = selectedId === img.id;
+                const isMulti = multiSelection.has(img.id);
+                const isSelected = isPrimary || isMulti;
                 const analysis = analysisMap[img.id];
 
                 return (
@@ -155,12 +159,37 @@ export function PhotoGrid() {
                       overflow: "hidden",
                       cursor: "pointer",
                       outline: isSelected
-                        ? "2px solid var(--accent)"
+                        ? `2px solid var(--accent)`
                         : "2px solid transparent",
                       opacity: mark === "delete" ? 0.4 : 1,
                       transition: "outline 0.1s, opacity 0.15s",
                     }}
                   >
+                    {/* Multi-selection checkbox indicator */}
+                    {(isMulti || multiSelection.size > 0) && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: 4,
+                          left: 4,
+                          zIndex: 5,
+                          width: 18,
+                          height: 18,
+                          borderRadius: 4,
+                          background: isMulti ? "var(--accent)" : "rgba(0,0,0,0.4)",
+                          border: isMulti ? "none" : "1.5px solid rgba(255,255,255,0.6)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 11,
+                          color: "#fff",
+                          fontWeight: 700,
+                          pointerEvents: "none",
+                        }}
+                      >
+                        {isMulti ? "\u2713" : ""}
+                      </div>
+                    )}
                     {img.thumbnailPath ? (
                       <img
                         src={convertFileSrc(img.thumbnailPath)}
