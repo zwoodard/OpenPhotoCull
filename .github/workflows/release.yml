@@ -32,6 +32,9 @@ jobs:
         with:
           workspaces: ./src-tauri -> target
 
+      - name: Install build tools (nasm for turbojpeg-sys SIMD)
+        run: brew install nasm
+
       - name: Install npm dependencies
         run: npm ci
 
