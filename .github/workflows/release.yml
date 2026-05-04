@@ -46,11 +46,14 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "OpenPhotoCull ${{ github.ref_name }}"
           releaseBody: |
-            Unsigned macOS build (universal: Intel + Apple Silicon).
+            Ad-hoc signed macOS build (universal: Intel + Apple Silicon).
+            Not notarized — first launch needs a one-time approval.
 
-            **First-time install:** macOS will block the app because it isn't signed. Either:
-              - Right-click the app in /Applications → Open → Open, or
-              - Run `xattr -cr /Applications/OpenPhotoCull.app` after copying it.
+            **Install:**
+            1. Download the `.dmg`, open it, drag `OpenPhotoCull.app` to `/Applications`.
+            2. Double-click the app. macOS will say it can't verify the developer — click **Done**.
+            3. Open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to OpenPhotoCull.
+            4. Confirm one more time and the app will launch. Subsequent launches just work.
           releaseDraft: true
           prerelease: false
           args: --target universal-apple-darwin
