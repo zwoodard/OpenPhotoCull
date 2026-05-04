@@ -19,11 +19,12 @@ npx tsc --noEmit
 # Check Rust only
 cargo check --manifest-path src-tauri/Cargo.toml
 
-# Run benchmark
-cargo build --release --manifest-path src-tauri/Cargo.toml --bin bench
+# Run benchmark (bench/dev binaries are gated behind the bench-bins feature)
+cargo build --release --manifest-path src-tauri/Cargo.toml --features bench-bins --bin bench
 ./src-tauri/target/release/bench test-photos/sampled2 8
 
 # Generate synthetic test images
+cargo build --release --manifest-path src-tauri/Cargo.toml --features bench-bins --bin gen_test_images
 ./src-tauri/target/release/gen_test_images test-photos/sampled2/DSCF9687.JPG test-photos/synthetic
 ```
 
