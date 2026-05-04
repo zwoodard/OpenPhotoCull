@@ -21,7 +21,24 @@ pub struct IndexedImage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlurResult {
+    /// Whole-frame Laplacian variance. Retained for sorting and threshold tuning.
     pub laplacian_variance: f64,
+    /// Mean Laplacian variance across tiles (≈ laplacian_variance, slightly different weighting).
+    pub mean_tile_variance: f64,
+    /// Sharpest single tile. Survives a small sharp subject in a sea of bokeh.
+    pub max_tile_variance: f64,
+    /// 95th percentile of tile variances. Robust peak — less noise-sensitive than max.
+    pub p95_tile_variance: f64,
+    /// Fraction of tiles whose variance exceeds the canonical sharp threshold (100).
+    pub sharp_tile_fraction: f64,
+    /// Largest connected cluster of sharp tiles, as a fraction of total tile count.
+    /// Distinguishes "one coherent in-focus subject" from "scattered noise".
+    pub largest_sharp_cluster: f64,
+    /// EXIF-derived: wide aperture or long lens suggests intentional shallow DOF.
+    pub bokeh_likely: bool,
+    /// EXIF-derived: shutter slower than 1/focal_length — likely hand-held shake.
+    pub shake_risk: bool,
+    /// Default classification at the canonical threshold. Frontend overrides via isBlurry().
     pub is_blurry: bool,
 }
 
@@ -64,6 +81,9 @@ pub struct SubjectFocusResult {
     pub focus_ratio: f64,
     /// "SubjectSharp" | "SubjectBlurry" | "BackFocus" | "AllBlurry"
     pub verdict: String,
+    /// Where the subject mask came from: "face" (Vision face detection) or
+    /// "saliency" (class-agnostic objectness — used when no faces found).
+    pub subject_source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -23,7 +23,7 @@ export function BulkActions() {
     const toDelete: string[] = [];
     for (const img of images) {
       const a = analysisMap[img.id];
-      if (isBlurry(a?.blur, settings)) toDelete.push(img.id);
+      if (isBlurry(a?.blur, a?.subjectFocus, settings)) toDelete.push(img.id);
     }
     if (toDelete.length > 0) bulkMark(toDelete, "delete");
   };

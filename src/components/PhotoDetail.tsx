@@ -1,5 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { useStore, isBlurry, hasExposureIssue, exposureVerdict } from "../store";
+import { useStore, isBlurry, hasExposureIssue, exposureVerdict, blurIntent } from "../store";
 import { dupGroupColor } from "../lib/duplicates";
 
 export function PhotoDetail() {
@@ -127,13 +127,17 @@ export function PhotoDetail() {
             {analysis.blur && (
               <div
                 style={{
-                  color: isBlurry(analysis.blur, settings)
+                  color: isBlurry(analysis.blur, analysis.subjectFocus, settings)
                     ? "var(--warning)"
                     : "var(--success)",
                 }}
               >
-                Blur: {analysis.blur.laplacianVariance.toFixed(1)} variance
-                {isBlurry(analysis.blur, settings) ? ` (blurry, threshold: ${settings.blurThreshold})` : " (sharp)"}
+                Blur: {blurIntent(analysis.blur, analysis.subjectFocus)} — global{" "}
+                {analysis.blur.laplacianVariance.toFixed(0)}, max-tile{" "}
+                {analysis.blur.maxTileVariance.toFixed(0)}, sharp{" "}
+                {(analysis.blur.sharpTileFraction * 100).toFixed(0)}%
+                {analysis.blur.bokehLikely && " · bokeh-likely"}
+                {analysis.blur.shakeRisk && " · shake-risk"}
               </div>
             )}
             {analysis.exposure && (
@@ -171,7 +175,8 @@ export function PhotoDetail() {
                 }
                 {" "}(subject: {analysis.subjectFocus.subjectBlurVariance.toFixed(0)},
                 bg: {analysis.subjectFocus.backgroundBlurVariance.toFixed(0)},
-                ratio: {analysis.subjectFocus.focusRatio.toFixed(2)})
+                ratio: {analysis.subjectFocus.focusRatio.toFixed(2)},
+                source: {analysis.subjectFocus.subjectSource})
               </div>
             )}
             {analysis.closedEyes && (

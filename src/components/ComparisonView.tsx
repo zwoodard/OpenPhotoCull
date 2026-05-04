@@ -112,7 +112,7 @@ export function ComparisonView() {
           const isBest = img.id === bestId;
           const blurVar =
             analysis?.blur?.laplacianVariance ?? 0;
-          const blurry = isBlurry(analysis?.blur, settings);
+          const blurry = isBlurry(analysis?.blur, analysis?.subjectFocus, settings);
 
           return (
             <div

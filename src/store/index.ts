@@ -10,12 +10,73 @@ import type {
 
 // ── Threshold helpers ──
 
+function hasStrongSharpRegion(blur: NonNullable<AnalysisResults["blur"]>): boolean {
+  // Mirrors the backend rule in compute_blur:
+  //  - either a strong peak tile (clearly in-focus content), or
+  //  - meaningful sharp area (fraction AND cluster together).
+  // Bokeh-likely shots use relaxed thresholds.
+  const peakThresh = blur.bokehLikely ? 700 : 900;
+  const fracThresh = blur.bokehLikely ? 0.04 : 0.12;
+  const clusterThresh = blur.bokehLikely ? 0.025 : 0.06;
+  if (blur.maxTileVariance >= peakThresh) return true;
+  return (
+    blur.sharpTileFraction >= fracThresh &&
+    blur.largestSharpCluster >= clusterThresh
+  );
+}
+
 export function isBlurry(
   blur: AnalysisResults["blur"],
+  subjectFocus: AnalysisResults["subjectFocus"],
   settings: AnalysisSettings,
 ): boolean {
   if (!blur) return false;
-  return blur.laplacianVariance < settings.blurThreshold;
+  // Subject-focus (Vision face or saliency) gives a semantic ground truth
+  // when available. If Vision found a subject and reports BOTH subject and
+  // background are below the sharpness floor, the photo is blurry — even
+  // if a few scattered sharp tiles happen to clear the tile-cluster gate.
+  // Conversely, an explicit SubjectSharp verdict beats the tile heuristic.
+  if (subjectFocus) {
+    if (subjectFocus.verdict === "AllBlurry") return true;
+    if (subjectFocus.verdict === "SubjectBlurry") return true;
+    if (subjectFocus.verdict === "SubjectSharp") return false;
+    // BackFocus falls through — has its own filter; tile rule decides whether
+    // it also counts as "blurry" for the headline filter.
+  }
+  // If the photo has clearly-in-focus content somewhere, it isn't "blurry"
+  // regardless of how soft the rest of the frame is. This is what saves
+  // shallow-DOF shots (dogs, portraits, products) where the global Laplacian
+  // is dragged down by intentional background blur.
+  if (hasStrongSharpRegion(blur)) return false;
+  // No strong sharp region — fall back to global threshold check.
+  const globalScore = blur.meanTileVariance || blur.laplacianVariance;
+  return globalScore < settings.blurThreshold;
+}
+
+export function blurIntent(
+  blur: AnalysisResults["blur"],
+  subjectFocus: AnalysisResults["subjectFocus"],
+): "Sharp" | "IntentionalBokeh" | "ShakeBlur" | "OutOfFocus" | "Unknown" {
+  if (!blur) return "Unknown";
+  // Trust definitive subject-focus verdicts over tile heuristics.
+  if (subjectFocus) {
+    if (subjectFocus.verdict === "AllBlurry") {
+      return blur.shakeRisk ? "ShakeBlur" : "OutOfFocus";
+    }
+    if (subjectFocus.verdict === "SubjectBlurry") {
+      return blur.shakeRisk ? "ShakeBlur" : "OutOfFocus";
+    }
+    if (subjectFocus.verdict === "SubjectSharp") {
+      return blur.bokehLikely || blur.meanTileVariance < 100
+        ? "IntentionalBokeh"
+        : "Sharp";
+    }
+  }
+  if (hasStrongSharpRegion(blur)) {
+    if (blur.meanTileVariance >= 100 && !blur.bokehLikely) return "Sharp";
+    return "IntentionalBokeh";
+  }
+  return blur.shakeRisk ? "ShakeBlur" : "OutOfFocus";
 }
 
 export function hasExposureIssue(
@@ -215,9 +276,15 @@ export const useStore = create<AppState>((set, get) => ({
     let imgs = [...state.images];
 
     if (state.filters.showBlurry === true) {
-      imgs = imgs.filter((i) => isBlurry(state.analysisMap[i.id]?.blur, s));
+      imgs = imgs.filter((i) => {
+        const a = state.analysisMap[i.id];
+        return isBlurry(a?.blur, a?.subjectFocus, s);
+      });
     } else if (state.filters.showBlurry === false) {
-      imgs = imgs.filter((i) => !isBlurry(state.analysisMap[i.id]?.blur, s));
+      imgs = imgs.filter((i) => {
+        const a = state.analysisMap[i.id];
+        return !isBlurry(a?.blur, a?.subjectFocus, s);
+      });
     }
 
     if (state.filters.showExposureIssues === true) {

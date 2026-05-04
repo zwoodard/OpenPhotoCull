@@ -24,6 +24,13 @@ export interface ImageEntry {
 
 export interface BlurResult {
   laplacianVariance: number;
+  meanTileVariance: number;
+  maxTileVariance: number;
+  p95TileVariance: number;
+  sharpTileFraction: number;
+  largestSharpCluster: number;
+  bokehLikely: boolean;
+  shakeRisk: boolean;
   isBlurry: boolean;
 }
 
@@ -52,6 +59,7 @@ export interface SubjectFocusResult {
   backgroundBlurVariance: number;
   focusRatio: number;
   verdict: "SubjectSharp" | "SubjectBlurry" | "BackFocus" | "AllBlurry";
+  subjectSource: "face" | "saliency";
 }
 
 export interface FaceInfo {

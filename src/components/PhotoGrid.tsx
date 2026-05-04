@@ -268,7 +268,7 @@ export function PhotoGrid() {
                       ) : (
                         // Don't show BLUR if subject is sharp (intentional bokeh)
                         analysis?.subjectFocus?.verdict !== "SubjectSharp" &&
-                        isBlurry(analysis?.blur, settings) && (
+                        isBlurry(analysis?.blur, analysis?.subjectFocus, settings) && (
                           <span
                             style={{
                               padding: "1px 4px",

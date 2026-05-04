@@ -25,7 +25,7 @@ export function FilterBar() {
       for (const img of images) {
         const a = analysisMap[img.id];
         if (!a) continue;
-        if (isBlurry(a.blur, settings)) blurry++;
+        if (isBlurry(a.blur, a.subjectFocus, settings)) blurry++;
         if (hasExposureIssue(a.exposure, settings)) exposure++;
         if (a.duplicateGroupId != null) dup++;
         if (a.closedEyes?.hasClosedEyes === true) closedEyes++;
