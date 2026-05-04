@@ -3,49 +3,19 @@ name = "photo-scrub"
 version = "0.1.0"
 edition = "2021"
 default-run = "photo-scrub"
+# Do not auto-discover binaries from src/bin/. Only the explicit [[bin]]
+# below is built, so dev-only files in src/bin/ never end up in the .app
+# bundle (Tauri iterates [[bin]] entries and breaks on universal builds
+# if any aren't lipo'd). Use src-tauri/examples/ for dev/bench tools.
+autobins = false
 
 [lib]
 name = "photo_scrub_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-[features]
-# Build the bench/dev binaries (off by default so `cargo build` and
-# `tauri build` only produce the main app).
-bench-bins = []
-
 [[bin]]
 name = "photo-scrub"
 path = "src/main.rs"
-
-[[bin]]
-name = "bench"
-path = "src/bin/bench.rs"
-required-features = ["bench-bins"]
-
-[[bin]]
-name = "gpu_bench"
-path = "src/bin/gpu_bench.rs"
-required-features = ["bench-bins"]
-
-[[bin]]
-name = "vision_bench"
-path = "src/bin/vision_bench.rs"
-required-features = ["bench-bins"]
-
-[[bin]]
-name = "gen_test_images"
-path = "src/bin/gen_test_images.rs"
-required-features = ["bench-bins"]
-
-[[bin]]
-name = "face_debug"
-path = "src/bin/face_debug.rs"
-required-features = ["bench-bins"]
-
-[[bin]]
-name = "face_perf"
-path = "src/bin/face_perf.rs"
-required-features = ["bench-bins"]
 
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset"] }
