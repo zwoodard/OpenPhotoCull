@@ -36,11 +36,11 @@ Folder → discovery (walkdir) → parallel per-image processing (rayon, 8 threa
   → Decode (Image I/O on macOS > 1MB, turbojpeg otherwise)
   → SIMD resize to 1024px (fast_image_resize)
   → Thumbnail from resized image (300px JPEG)
-  → Blur detection (Laplacian variance)
+  → Blur detection (tile-grid Laplacian variance + EXIF intent flags)
   → Exposure analysis (luminance histogram)
   → Perceptual hash (dHash 16x16)
   → Face detection + eye openness (Apple Vision, macOS)
-  → Subject focus (blur in face vs background regions)
+  → Subject focus: face bboxes → saliency fallback when no faces (Apple Vision, macOS)
   → Face embeddings for person grouping (Apple Vision, macOS)
   → DROP analysis image (constant memory)
 → Post-pass grouping (timestamps only, no images):
@@ -58,7 +58,8 @@ Folder → discovery (walkdir) → parallel per-image processing (rayon, 8 threa
 | Add a new analyzer | `src-tauri/src/commands/scan.rs` (pipeline loop), `src-tauri/src/index/store.rs` (types) |
 | Add a new Tauri command | `src-tauri/src/commands/`, register in `src-tauri/src/lib.rs` |
 | Change decode strategy | `src-tauri/src/thumbnail/mod.rs` (process_image fn) |
-| Apple framework FFI | `src-tauri/src/thumbnail/apple_imageio.rs`, `src-tauri/src/pipeline/closed_eyes.rs`, `src-tauri/src/pipeline/face_grouping.rs` |
+| Apple framework FFI | `src-tauri/src/thumbnail/apple_imageio.rs`, `src-tauri/src/pipeline/closed_eyes.rs`, `src-tauri/src/pipeline/face_grouping.rs`, `src-tauri/src/pipeline/saliency.rs` |
+| Tune blur classification | `compute_blur` in `scan.rs` (tile metrics, gates), `isBlurry` in `src/store/index.ts` (mirrors backend) |
 | Add frontend filter | `src/store/index.ts` (filters + filteredImages), `src/components/FilterBar.tsx` |
 | Add analysis badge | `src/components/PhotoGrid.tsx` (badge section near line 250) |
 | Add detail panel info | `src/components/PhotoDetail.tsx` (analysis section) |
@@ -84,15 +85,33 @@ Folder → discovery (walkdir) → parallel per-image processing (rayon, 8 threa
 
 ```rust
 AnalysisResults {
-  blur: Option<BlurResult>           // laplacian_variance, is_blurry
+  blur: Option<BlurResult>           // global + tile metrics (mean/max/p95/sharp_fraction/cluster),
+                                     // EXIF intent (bokeh_likely, shake_risk), is_blurry
   exposure: Option<ExposureResult>   // mean_luminance, pct_under/over, verdict
   duplicate_group_id: Option<String> // "dup-1", "dup-2", etc.
   scene_group_id: Option<String>     // "scene-1", etc.
   closed_eyes: Option<ClosedEyesResult> // face_count, per-face eye openness
-  subject_focus: Option<SubjectFocusResult> // subject vs bg blur, verdict
+  subject_focus: Option<SubjectFocusResult> // subject vs bg blur, verdict, subject_source ("face"|"saliency")
   faces: Option<Vec<FaceInfo>>       // per-face bbox, person_id, thumbnail
 }
 ```
+
+### Blur Classification
+
+Blur uses a layered decision (mirrored in backend `compute_blur` and frontend
+`isBlurry`):
+
+1. **Subject_focus override** — if Vision (face or saliency) reports a definitive
+   verdict, trust it: `SubjectSharp` → not blurry; `AllBlurry` / `SubjectBlurry` → blurry.
+2. **Strong sharp region** — single tile peak above 900 (or 700 if bokeh-likely),
+   OR sharp fraction ≥12% AND largest sharp cluster ≥6% (relaxed to 4% / 2.5% for bokeh).
+3. **Fallback** — global mean tile variance vs `settings.blurThreshold`.
+
+EXIF intent flags (`bokeh_likely`, `shake_risk`) come from aperture, focal length,
+and shutter speed — used to relax thresholds for shallow-DOF shots.
+
+Saliency fallback (`pipeline/saliency.rs`) only runs when face detection found
+zero faces, so people-photos pay no extra Vision cost.
 
 ## Important Patterns
 

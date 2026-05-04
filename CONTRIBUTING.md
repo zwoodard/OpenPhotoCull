@@ -41,7 +41,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 ### Adding a New Analyzer
 
-1. Create a new module in `src-tauri/src/pipeline/` (see `blur.rs` for a simple example)
+1. For Vision/FFI-backed analyzers, create a module in `src-tauri/src/pipeline/` (see `saliency.rs` or `closed_eyes.rs` for the FFI pattern). For pure-Rust analyzers, just add a function alongside `compute_blur` / `compute_exposure` in `src-tauri/src/commands/scan.rs`.
 2. Add result types to `src-tauri/src/index/store.rs` (`AnalysisResults` struct)
 3. Wire it into the scan pipeline in `src-tauri/src/commands/scan.rs`
 4. Add TypeScript types in `src/store/types.ts`

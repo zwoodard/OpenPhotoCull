@@ -18,8 +18,8 @@ Built with Rust + Tauri v2 + React. Runs natively on macOS with cross-platform s
 
 ### Analysis Pipeline (single-pass, ~120 images/sec)
 
-- **Blur detection** — Laplacian variance with tunable threshold. Distinguishes overall blur from intentional bokeh via subject focus detection.
-- **Subject focus detection** — Computes blur separately in face regions vs. background. Flags back-focused shots (face blurry, background sharp) while correctly ignoring shallow depth-of-field.
+- **Blur detection** — Tile-grid Laplacian variance plus EXIF intent flags (aperture, focal length, shutter speed). Correctly keeps shallow depth-of-field shots where the subject is sharp on a soft background, and distinguishes hand-shake blur from out-of-focus blur.
+- **Subject focus detection** — Compares blur inside the subject region versus the background. Uses face bounding boxes when Vision detects a person, and falls back to class-agnostic Vision saliency for non-human subjects (dogs, products, flowers, etc.). Flags back-focused shots while preserving intentional bokeh.
 - **Exposure analysis** — Luminance histogram detects underexposed, overexposed, and high-contrast images.
 - **Duplicate detection** — EXIF timestamp clustering + perceptual hashing (dHash) groups near-identical shots together.
 - **Closed eye detection** — Apple Vision framework detects faces and measures eye openness. Flags photos where someone blinked. *(macOS only)*
@@ -119,13 +119,13 @@ src-tauri/src/                    Rust backend
 │   ├── analyze.rs                Fetch pre-computed analysis results
 │   ├── review.rs                 Keep/delete marks, bulk operations
 │   └── export.rs                 Move marked files to OS trash
-├── pipeline/
-│   ├── blur.rs                   Laplacian variance blur detection
-│   ├── exposure.rs               Luminance histogram exposure analysis
-│   ├── duplicates.rs             EXIF clustering + perceptual hashing
-│   ├── closed_eyes.rs            Apple Vision face/eye detection (macOS)
-│   ├── face_grouping.rs          Vision feature print embeddings + clustering (macOS)
-│   └── traits.rs                 Analyzer trait for extensibility
+├── pipeline/                     Vision-backed analyzers (macOS).
+│   ├── closed_eyes.rs            Face detection + eye-openness via VNDetectFaceLandmarksRequest
+│   ├── face_grouping.rs          Feature-print embeddings + clustering
+│   ├── saliency.rs               Class-agnostic subject bboxes via VNGenerateObjectnessBasedSaliencyImageRequest
+│   └── registry.rs               Progress event types
+│   (Blur, exposure, duplicates, and scene grouping are inlined in commands/scan.rs
+│    — see compute_blur, compute_exposure, find_duplicate_groups, find_scene_groups.)
 ├── thumbnail/
 │   ├── mod.rs                    Decode strategy: Image I/O → turbojpeg → image crate
 │   └── apple_imageio.rs          Apple hardware JPEG decoder FFI (macOS)
@@ -179,10 +179,10 @@ src/                              React/TypeScript frontend
 | Apple Image I/O hardware decode | Yes | — | — |
 | Closed eye detection (Vision) | Yes | — | — |
 | Face grouping by person (Vision) | Yes | — | — |
-| Subject focus detection | Yes* | Yes | Yes |
+| Subject focus detection (face + saliency) | Yes | — | — |
 | Move to OS trash | Yes | Yes | Yes |
 
-*Subject focus requires face bounding boxes from Vision on macOS. On other platforms, it falls back to overall blur only.
+Subject focus uses Apple Vision (face detection, with class-agnostic saliency as fallback for non-human subjects). On Windows / Linux, blur classification falls back to tile-based metrics + EXIF intent flags only — still distinguishes intentional bokeh from accidental blur, just without the per-photo subject mask.
 
 ## Tech Stack
 
